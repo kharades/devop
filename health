@@ -1,0 +1,254 @@
+#!/bin/bash
+#############################################################################
+#This Script is to perform post reboot health check.                        #
+#############################################################################
+clear
+GREEN='\033[01;32m'
+NONE='\033[00m'
+YELLOW='\033[01;33m'
+RED='\033[01;31m'
+BLUE='\033[01;34m'
+servername=`echo $HOSTNAME |tr '[:lower:]' '[:upper:]'`
+db2install=$(find /etc/group | xargs grep db2asgrp |wc -l)
+db2process1=$(ps -ef|grep db2fmcd |grep -v grep |wc -l)
+db2process=$(ps -ef|grep db2sys |grep -v grep |wc -l)
+oraprocess=$(ps -ef|grep pmon |grep -v grep|wc -l)
+tnsprocess=$(ps -ef|grep tns |grep -v grep|wc -l)
+netgainprocess=$(ps -ef|grep netgain |grep -v grep|wc -l)
+postrebootlog="/tmp/postrebootlog_`date +%d%m%Y`"
+lastr=$(last |grep system |head -1 |awk '{print $5 " " $6 " " $7 " " $8}')
+tput cup 1 25
+tput smul; echo -e "${BLUE}POST REBOOT SYATEM HEALTH CHECK REPORT${NONE}\n"; tput rmul
+
+echo  "`date +'%b %d %H:%M:%S'` Post reboot healthcheck started..." > $postrebootlog
+logger "Post reboot healthcheck started..."
+echo -e "\t \t ${GREEN} Server Last rebooted @ $lastr ${NONE}\n"
+
+#################DB verification
+if [ "${servername:0:1}" = "P" ]; then
+        if [ $db2install -ge "1" ] || [ -f /etc/oragchomelist ] ; then
+                if [ $db2process -ge 1 ] ; then
+                        echo -e "DB2 DATABASE \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "DB2 DATABASE \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                        if [ $netgainprocess -ge 1 ]; then
+                                echo -e "DB NETGAIN  \t \t ===========> ${GREEN}OK ${NONE}"
+                                echo -e "DB NETGAIN  \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                        else
+                                echo -e "DB NETGAIN  \t \t ===========> ${RED}NOT OK, inform DBA and NSM team ${NONE}"
+                                echo -e "DB NETGAIN  \t \t ===========> ${RED}NOT OK, inform DBA and NSM team ${NONE}" >> $postrebootlog
+                        fi
+                elif [ $oraprocess -ge "1" ] && [ $tnsprocess -ge "1" ]; then
+                        echo -e "ORA DATABASE \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "ORA DATABASE \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                else
+                        echo -e "DATABASE \t \t ===========> ${RED}NOT OK, Inform LINUX and DBA to check database service ${NONE}"
+                        echo -e "DATABASE \t \t ===========> ${RED}NOT OK, Inform LINUX and DBA to check database service ${NONE}" >> $postrebootlog
+                fi
+     else
+                echo -e "DATABASE  \t \t ===========> ${YELLOW}NOT INSTALLED ${NONE}"
+                echo -e "DATABASE  \t \t ===========> ${YELLOW}NOT INSTALLED ${NONE}" >> $postrebootlog
+        fi
+else
+        echo -e "DATABASE  \t \t ===========> ${YELLOW}This is DR server, Database shouldnt be up in general scenario ${NONE}"
+        echo -e "DATABASE  \t \t ===========> ${YELLOW}This is DR server, Database shouldnt be up in general scenario ${NONE}" >> $postrebootlog
+fi
+
+#HORCM process monitoring
+if [ -d /HORCM/usr/bin/ ]; then
+    for i in `/bin/ls /etc/horcm?.conf 2>/dev/null`
+        do
+            x=${i:10:1}
+                horcm_p=$(ps -ef|grep horcmd_0$x |grep -v grep |wc -l)
+                if [ $horcm_p -ge "1" ]; then
+                        echo -e "HORCM $x \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "HORCM $x \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                else
+                        echo -e "HORCM $x \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}"
+                        echo -e "HORCM $x \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}" >> $postrebootlog
+                fi
+    done
+else
+        echo -e "HORCM  \t \t \t ===========> ${YELLOW}NOT INSTALLED ${NONE}"
+        echo -e "HORCM  \t \t \t ===========> ${YELLOW}NOT INSTALLED ${NONE}" >> $postrebootlog
+fi
+
+###offhost checking
+offhost_check=$(ps -ef|grep offhost |grep -v grep |wc -l)
+if [ -f /etc/horcm1.conf ]; then
+        if [ $offhost_check -ge "1" ]; then
+                echo -e "OFFHOST agent \t \t ===========> ${GREEN}OK ${NONE}"
+                echo -e "OFFHOST agent \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+        else
+                echo -e "OFFHOST agent \t \t ===========> ${RED}NOT OK, inform OS and NBU team ${NONE}"
+                echo -e "OFFHOST agent \t \t ===========> ${RED}NOT OK, inform OS and NBU team ${NONE}" >> $postrebootlog
+        fi
+else
+        echo -e "OFFHOST agent \t \t ===========> ${YELLOW}OFFHOST agent not Required ${NONE}"
+        echo -e "OFFHOST agent \t \t ===========> ${YELLOW}OFFHOST agent not Required ${NONE}" >> $postrebootlog
+fi
+
+#controlm services
+if [ "${servername:0:1}" = "P" ]; then
+        if [ -d /usr/controlm/ctm_server ]; then
+                numprocesses=$(ps -ef|grep ctm_server |wc -l)
+                if [ $numprocesses -gt "9" ] ; then
+                        echo -e "CTM server \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "CTM server \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                else
+                        echo -e "CTM server \t \t ==========> ${RED}Inform Controlm team to check on CTM server ${NONE}"
+                        echo -e "CTM server \t \t ==========> ${RED}Inform Controlm team to check on CTM server ${NONE}" >> $postrebootlog
+                fi
+        else
+                echo -e "CTM server  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}"
+                echo -e "CTM server  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}" >> $postrebootlog
+        fi
+
+        if [ -d /usr/controlm/ctm ] || [ -d /usr/controlm/ctm_agent ]; then
+                numprocesses=$(ps -ef|grep ctmag |grep -v grep|wc -l)
+                if [ $numprocesses -ge "1"  ] ; then
+                        echo -e "CTM agent \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "CTM agent \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                else
+                        echo -e "CTM agent \t \t ===========> ${RED}Inform Controlm team to check on CTM agent ${NONE}"
+                        echo -e "CTM agent \t \t ===========> ${RED}Inform Controlm team to check on CTM agent ${NONE}" >> $postrebootlog
+                fi
+        else
+                echo -e "CTM agent  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}"
+                echo -e "CTM agent  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}" >> $postrebootlog
+        fi
+else
+        if [ -d /usr/controlm/ctm ] || [ -d /usr/controlm/ctm_agent ]; then
+                numprocesses=$(ps -ef|grep ctmag |grep -v grep|wc -l)
+                if [ $numprocesses -ge "1"  ] ; then
+                        echo -e "CTM agent \t \t ===========> ${GREEN}OK ${NONE}"
+                        echo -e "CTM agent \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+                else
+                        echo -e "CTM agent \t \t ===========> ${RED}Inform Controlm team to check on CTM agent ${NONE}"
+                        echo -e "CTM agent \t \t ===========> ${RED}Inform Controlm team to check on CTM agent ${NONE}" >> $postrebootlog
+                fi
+        else
+                echo -e "CTM agent  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}"
+                echo -e "CTM agent  \t \t ===========> ${YELLOW}Not INSTALLED ${NONE}" >> $postrebootlog
+        fi
+fi
+
+####ntp
+ntp_check=$(ps -ef|grep ntp |grep -v grep |wc -l)
+if [ -f /etc/ntp.conf ]; then
+        if [ $ntp_check -ge "1" ]; then
+                echo -e "NTP \t \t \t ===========> ${GREEN}OK ${NONE}"
+                echo -e "NTP \t \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+        else
+                echo -e "NTP \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}"
+                echo -e "NTP \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}" >> $postrebootlog
+        fi
+else
+        echo -e "NTP  \t \t \t ===========> ${YELLOW}NTP not Configured ${NONE}"
+        echo -e "NTP  \t \t \t ===========> ${YELLOW}NTP not Configured ${NONE}" >> $postrebootlog
+fi
+
+######Cron
+cron_check=$(ps -ef|grep cron |grep -v grep |wc -l)
+if [ $cron_check -ge "1" ]; then
+        echo -e "CRON \t \t \t ===========> ${GREEN}OK ${NONE}"
+        echo -e "CRON \t \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+else
+        echo -e "CRON \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}"
+        echo -e "CRON \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}" >> $postrebootlog
+fi
+
+####
+#syslog services
+SYSlog=$(ps -ef | grep 'syslog'| grep -v 'grep'| wc -l)
+if [ $SYSlog -ge '1' ]; then
+        echo -e "SYSLOG \t \t \t ===========> ${GREEN}OK ${NONE}"
+        echo -e "SYSLOG \t \t \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+else
+        echo -e "SYSLOG \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}"
+        echo -e "SYSLOG \t \t \t ===========> ${RED}NOT OK, inform OS team ${NONE}" >> $postrebootlog
+fi
+
+
+######
+fstab_check=$(grep -w "swap" /etc/fstab |grep -v "#"|wc -l)
+swap_check=$(grep -w "partition" /proc/swaps |wc -l)
+if [ $fstab_check -ge "1"  ] ; then
+    if [ $swap_check -ge "1" ]; then
+                echo -e "SWAP Filesystem \t ===========> ${GREEN}OK ${NONE}"
+                echo -e "SWAP Filesystem \t ===========> ${GREEN}OK ${NONE}" >> $postrebootlog
+        else
+                echo -e "SWAP Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}"
+                echo -e "SWAP Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}" >> $postrebootlog
+        fi
+else
+        echo -e "SWAP Filesystem \t ===========> ${YELLOW}SWAP not Configured ${NONE}"
+        echo -e "SWAP Filesystem \t ===========> ${YELLOW}SWAP not Configured ${NONE}" >> $postrebootlog
+fi
+
+
+#######
+#checking filesystem
+fstab_check_fs=$(cat /etc/fstab | egrep -v '#|devpts|auto|/media/|swap|/proc|/sys|^$'|awk '{print $2}'|wc -l)
+current_df=$(df -Ph | egrep -v 'Filesyste'|awk '{print $NF}'|wc -l)
+NFSMOUNT=`cat /etc/fstab |grep -v grep |grep ':' |grep -v '#'| wc -l`
+NFSMOUNTED=`cat /proc/mounts |grep -v grep |grep ':'|wc -l`
+vcscheck=`ps -ef | grep vcs | grep -v grep|wc -l`
+
+
+NFScheck()
+{
+        if [ $NFSMOUNT == $NFSMOUNTED ] ;then
+                        echo -e "Mounted Filesystem \t ===========> ${GREEN}OK ${NONE}\n"
+                        echo -e "Mounted Filesystem \t ===========> ${GREEN}OK ${NONE}\n" >> $postrebootlog
+        else
+                NFScheckBKP=$(cat /usr/semasupp/log/CHKDF.$[`date +%y%m%d`-1].org | grep ':'|grep -v '^$'|wc -l)
+                if [ $NFScheckBKP == $NFSMOUNTED ] ; then
+                                echo -e "Mounted Filesystem \t ===========> ${GREEN}OK ${NONE}\n"
+                                echo -e "Mounted Filesystem \t ===========> ${GREEN}OK ${NONE}\n" >> $postrebootlog
+                        else
+                                echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n"
+                                echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n" >> $postrebootlog
+                fi
+        fi
+}
+mountpintcheck()
+{
+if [ $vcscheck -ge '3' ]; then
+        if [ $fstab_check_fs == $current_df ] || [ $chkdf_check == $current_df ]; then
+                NFScheck
+        else
+                echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n"
+                echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n" >> $postrebootlog
+        fi
+else
+        if [ $fstab_check_fs == $current_df ] ; then
+                NFScheck
+        else
+                if [ $chkdf_check == $current_df ]; then
+                        NFScheck
+                else
+                        echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n"
+                        echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK, inform OS team ${NONE}\n" >> $postrebootlog
+                fi
+        fi
+fi
+}
+
+
+
+if [ -f /usr/semasupp/log/CHKDF.$[`date +%y%m%d`-1] ]; then
+    chkdf_check=$(cat /usr/semasupp/log/CHKDF.$[`date +%y%m%d`-1] | egrep -v '===|without_NFS|^$' | awk '{print $1}' | sort | uniq |wc -l) >&-
+        mountpintcheck
+elif [ -f /usr/semasupp/log/CHKDF. ]; then
+    chkdf_check=$(cat /usr/semasupp/log/CHKDF. | egrep -v '===|without_NFS|^$' | awk '{print $1}' | sort | uniq |wc -l) >&-
+        mountpintcheck
+else
+        echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK,CHKDF.$[`date +%y%m%d`-1] and CHKDF. file does not exist. Inform OS Team ${NONE}\n"
+        echo -e "Mounted Filesystem \t ===========> ${RED}NOT OK,CHKDF.$[`date +%y%m%d`-1] and CHKDF. file does not exist. Inform OS Team ${NONE}\n" >> $postrebootlog
+fi
+logger Post reboot healthcheck completed, refer $postrebootlog file to check Healthcheck status.
+echo -e "LEGENDS:-\n"
+echo -e "Status message in ${GREEN}GREEN${NONE} : OK - Component is OK & No action is required."
+echo -e "Status message in ${YELLOW}YELLOW${NONE}: INFO - Component is not applicaple & No action is required."
+echo -e "Status message in ${RED}RED${NONE}   : CRITICAL - immediately inform TCC2 support to check. \n"
+
